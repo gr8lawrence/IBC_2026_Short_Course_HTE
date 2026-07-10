@@ -1,0 +1,29 @@
+/* Compact, bordered table style for all slides */
+.reveal table {
+  border-collapse: collapse;
+  font-size: 0.85em;
+  border-top: 2px solid #888;
+  border-bottom: 2px solid #888;
+}
+
+.reveal table th,
+.reveal table td {
+  border: 1px solid #bbb;
+  padding: 3px 10px;
+}
+
+.reveal table thead th {
+  background-color: #f0f0f0;
+  border-bottom: 2px solid #888;
+}
+
+/* Center all figures */
+.reveal figure {
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.reveal figure .quarto-layout-panel {
+  justify-content: center;
+}
