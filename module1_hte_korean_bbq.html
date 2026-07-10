@@ -506,7 +506,7 @@ Figure&nbsp;1: <em>Everything Everywhere All at Once</em>: a masterpiece of coun
 <section id="a-potential-outcome-dataset-cont." class="slide level2">
 <h2>A Potential Outcome Dataset (Cont.)</h2>
 <div class="fragment">
-<p>Combining both groups — bold entries are the only values observed in reality:</p>
+<p>Combining both groups — bold entries are values observed in reality:</p>
 <table class="caption-top">
 <thead>
 <tr class="header">
@@ -555,6 +555,29 @@ Figure&nbsp;1: <em>Everything Everywhere All at Once</em>: a masterpiece of coun
 </tr>
 </tbody>
 </table>
+</div>
+<div class="fragment">
+<p>We never observe both potential outcomes for the same person.</p>
+</div>
+<div class="fragment">
+<p>This is the <strong>fundamental problem of causal inference</strong>.</p>
+</div>
+</section>
+<section id="a-potential-outcome-dataset-cont.-1" class="slide level2">
+<h2>A Potential Outcome Dataset (Cont.)</h2>
+<div id="fig-potential-outcomes" class="quarto-layout-panel">
+<figure class="quarto-float quarto-float-fig">
+<div aria-describedby="fig-potential-outcomes-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 100.0%;justify-content: flex-start;">
+<img data-src="images/choose_pos.jpg" style="width:35.0%">
+</div>
+</div>
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-potential-outcomes-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;2: When facing the fundamental problem of causal inference…
+</figcaption>
+</figure>
 </div>
 </section>
 <section id="notation" class="slide level2">
@@ -626,11 +649,7 @@ Figure&nbsp;1: <em>Everything Everywhere All at Once</em>: a masterpiece of coun
 <p><span class="math display">\[ \Delta_i := Y^*_i(1)-Y^*_i(0).\]</span></p>
 </div>
 <div class="fragment">
-<p>The ITE is conceptually appealing, but it can never be identified (or estimated) - we never observe both potential outcomes for the same person.</p>
-</div>
-<div class="fragment">
-<p>This is the <strong>fundamental problem of causal inference</strong>.</p>
-<!-- ![](images/evelyn-dialogue.png){width="30%," fig-align="center"} -->
+<p>The ITE is appealing, but it can <em>never</em> be identified or estimated - we never observe both potential outcomes for the same person.</p>
 </div>
 </section>
 <section id="average-treatment-effect-ate" class="slide level2">
@@ -653,10 +672,27 @@ Figure&nbsp;1: <em>Everything Everywhere All at Once</em>: a masterpiece of coun
 <p><strong>Note</strong></p>
 </div>
 <div class="callout-content">
-<p>The ATE is a direct causal quantity (estimand), but it hides <em>who benefits more or less</em> from the treatment.</p>
+<p>The ATE is a direct, identifiable causal quantity (estimand).</p>
 </div>
 </div>
 </div>
+</div>
+</section>
+<section id="average-treatment-effect-ate-cont." class="slide level2">
+<h2>Average Treatment Effect: ATE (Cont.)</h2>
+<div id="fig-ite-vs-ate" class="quarto-layout-panel">
+<figure class="quarto-float quarto-float-fig">
+<div aria-describedby="fig-ite-vs-ate-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 100.0%;justify-content: flex-start;">
+<img data-src="images/ITE_vs_ATE.jpg" style="width:50.0%">
+</div>
+</div>
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-ite-vs-ate-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;3: ITE vs.&nbsp;ATE
+</figcaption>
+</figure>
 </div>
 </section>
 <section id="ate-may-not-be-enough" class="slide level2">
@@ -708,6 +744,23 @@ Figure&nbsp;1: <em>Everything Everywhere All at Once</em>: a masterpiece of coun
 <li><strong>Resource allocation</strong> — directing treatments to likely responders to maximize treatment benefits.</li>
 <li><strong>Policy and regulation</strong> — subgroup evidence informs approved indications, labels, and contraindications.</li>
 </ul>
+</div>
+</section>
+<section id="section" class="slide level2">
+<h2></h2>
+<div id="fig-hte-question" class="quarto-layout-panel">
+<figure class="quarto-float quarto-float-fig">
+<div aria-describedby="fig-hte-question-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 100.0%;justify-content: flex-start;">
+<img data-src="images/HTE_question.jpg" style="width:54.0%">
+</div>
+</div>
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-hte-question-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;4: Definitely worth asking again…
+</figcaption>
+</figure>
 </div>
 </section>
 <section id="conditional-average-treatment-effect-cate---an-hte-estimand" class="slide level2">
@@ -780,6 +833,26 @@ Figure&nbsp;1: <em>Everything Everywhere All at Once</em>: a masterpiece of coun
 </tbody>
 </table>
 </div>
+<div class="fragment">
+<p>To plan and conduct the analysis effectively, you want to understand the research questions and their associated tasks.</p>
+</div>
+</section>
+<section id="hte-questions-and-tasks-cont." class="slide level2">
+<h2>HTE Questions and Tasks (Cont.)</h2>
+<div id="fig-hte-questions" class="quarto-layout-panel">
+<figure class="quarto-float quarto-float-fig">
+<div aria-describedby="fig-hte-questions-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 100.0%;justify-content: flex-start;">
+<img data-src="images/just-do-everything.jpg" style="width:50.0%">
+</div>
+</div>
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-hte-questions-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;5: Everyone’s favortie collaborator
+</figcaption>
+</figure>
+</div>
 </section></section>
 <section>
 <section id="estimation-of-cate" class="title-slide slide level1 center">
@@ -829,6 +902,23 @@ Figure&nbsp;1: <em>Everything Everywhere All at Once</em>: a masterpiece of coun
 </div>
 </div>
 </div>
+</div>
+</section>
+<section id="section-1" class="slide level2">
+<h2></h2>
+<div id="fig-causal-assumptions" class="quarto-layout-panel">
+<figure class="quarto-float quarto-float-fig">
+<div aria-describedby="fig-causal-assumptions-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 100.0%;justify-content: flex-start;">
+<img data-src="images/causal-assumptions.jpg" style="width:44.0%">
+</div>
+</div>
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-causal-assumptions-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;6: All assumptions are checked! Or are they?
+</figcaption>
+</figure>
 </div>
 </section>
 <section id="propensity-score" class="slide level2">
@@ -946,6 +1036,23 @@ Figure&nbsp;1: <em>Everything Everywhere All at Once</em>: a masterpiece of coun
 </div>
 </div>
 </div>
+</section>
+<section id="cate-estimation-methods-cont." class="slide level2">
+<h2>CATE Estimation Methods (Cont.)</h2>
+<div id="fig-cate-estimation" class="quarto-layout-panel">
+<figure class="quarto-float quarto-float-fig">
+<div aria-describedby="fig-cate-estimation-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 100.0%;justify-content: flex-start;">
+<img data-src="images/Meta-Learners-Causal-ML.jpg" style="width:54.0%">
+</div>
+</div>
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-cate-estimation-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;7: United by one (estimation) goal
+</figcaption>
+</figure>
+</div>
 </section></section>
 <section>
 <section id="domain-knowledge-methods" class="title-slide slide level1 center">
@@ -1047,6 +1154,23 @@ Figure&nbsp;1: <em>Everything Everywhere All at Once</em>: a masterpiece of coun
 </div>
 </div>
 </section>
+<section id="s-learner-cont." class="slide level2">
+<h2>S-Learner (Cont.)</h2>
+<div id="fig-change-my-mind" class="quarto-layout-panel">
+<figure class="quarto-float quarto-float-fig">
+<div aria-describedby="fig-change-my-mind-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 100.0%;justify-content: flex-start;">
+<img data-src="images/regression-s-learner.jpg" style="width:54.0%">
+</div>
+</div>
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-change-my-mind-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;8: Any taker?
+</figcaption>
+</figure>
+</div>
+</section>
 <section id="t-learner" class="slide level2">
 <h2>T-Learner</h2>
 <div class="fragment">
@@ -1074,7 +1198,7 @@ Figure&nbsp;1: <em>Everything Everywhere All at Once</em>: a masterpiece of coun
 </div>
 </div>
 <figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-t-learns-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
-Figure&nbsp;2: The limitations of T-learners. Credits to <span class="citation" data-cites="kennedy2023">Kennedy (<a href="#/references" role="doc-biblioref" onclick="">2023</a>)</span>.
+Figure&nbsp;9: The limitations of T-learners. Credits to <span class="citation" data-cites="kennedy2023">Kennedy (<a href="#/references" role="doc-biblioref" onclick="">2023</a>)</span>.
 </figcaption>
 </figure>
 </div>
@@ -2287,6 +2411,23 @@ Figure&nbsp;2: The limitations of T-learners. Credits to <span class="citation" 
 <ul>
 <li>HTE motivates ITR.</li>
 </ul>
+</div>
+</section>
+<section id="take-home-messages-cont." class="slide level2">
+<h2>Take-Home Messages (Cont.)</h2>
+<div id="fig-take-home" class="quarto-layout-panel">
+<figure class="quarto-float quarto-float-fig">
+<div aria-describedby="fig-take-home-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 100.0%;justify-content: flex-start;">
+<img data-src="images/finishing-short-course.jpg" style="width:36.0%">
+</div>
+</div>
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-take-home-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;10: Best of luck!
+</figcaption>
+</figure>
 </div>
 </section>
 <section id="recommended-sources" class="slide level2">

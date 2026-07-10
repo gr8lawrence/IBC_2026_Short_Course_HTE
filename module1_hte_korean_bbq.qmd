@@ -133,7 +133,7 @@ For those who are given the promotion:
 
 ## A Potential Outcome Dataset (Cont.)
 ::: {.fragment}
-Combining both groups — bold entries are the only values observed in reality:
+Combining both groups — bold entries are values observed in reality:
 
 | Customer $i$ | $A_i$ | $Y^*_i(0)$ | $Y^*_i(1)$ | $\Delta_i$ |
 |--------------|-------|------------|------------|------------|
@@ -142,6 +142,22 @@ Combining both groups — bold entries are the only values observed in reality:
 | ...          | ...   | ...        | ...        | ...        |
 | $n - 1$      | Y     | 6          | **6.5**    | 1          |
 | $n$          | Y     | 4          | **4.5**    | 0.5        |
+:::
+
+::: {.fragment}
+We never observe both potential outcomes for the same person.
+:::
+
+::: {.fragment}
+This is the **fundamental problem of causal inference**.
+:::
+
+## A Potential Outcome Dataset (Cont.)
+
+::: {#fig-potential-outcomes layout-ncol=1 fig-align="center"}
+![](images/choose_pos.jpg){width="35%"}
+
+When facing the fundamental problem of causal inference...
 :::
 
 ## Notation
@@ -181,16 +197,8 @@ $$ \Delta_i := Y^*_i(1)-Y^*_i(0).$$
 :::
 
 ::: {.fragment}
-The ITE is appealing, but it can never be identified or estimated - we never observe both potential outcomes for the same person.
+The ITE is appealing, but it can *never* be identified or estimated - we never observe both potential outcomes for the same person.
 :::
-
-::: {.fragment}
-This is the **fundamental problem of causal inference**.
-
-<!-- ![](images/evelyn-dialogue.png){width="30%," fig-align="center"} -->
-:::
-
-
 
 ## Average Treatment Effect: ATE
 
@@ -208,8 +216,16 @@ It is a population average effect. An example interpretation is:
 
 ::: {.fragment}
 ::: callout-note
-The ATE is a direct causal quantity (estimand), but it hides *who benefits more or less* from the treatment.
+The ATE is a direct, identifiable causal quantity (estimand). 
 :::
+:::
+
+## Average Treatment Effect: ATE (Cont.)
+
+::: {#fig-ite-vs-ate layout-ncol=1 fig-align="center"}
+![](images/ITE_vs_ATE.jpg){width="50%"}
+
+ITE vs. ATE
 :::
 
 ## ATE May Not Be Enough
@@ -245,6 +261,14 @@ By assuming homogeneous responses to a treatment, we cannot achieve the goals of
 - **Subgroup effects** — subgroups that show no response may be hidden by a positive ATE.
 - **Resource allocation** — directing treatments to likely responders to maximize treatment benefits.
 - **Policy and regulation** — subgroup evidence informs approved indications, labels, and contraindications.
+:::
+
+##
+
+::: {#fig-hte-question layout-ncol=1 fig-align="center"}
+![](images/HTE_question.jpg){width="54%"}
+
+Definitely worth asking again...
 :::
 
 ## Conditional Average Treatment Effect: CATE - an HTE Estimand
@@ -289,6 +313,21 @@ There are many distinct statistical tasks that could be performed based on diffe
 | For whom should treatment be prioritised, given limited resources or risks? | Treatment rule derivation      |
 +-----------------------------------------------------------------------------+--------------------------------+
 :::
+
+::: {.fragment}
+To plan and conduct the analysis effectively, you want to understand the research questions and their associated tasks.
+:::
+
+## HTE Questions and Tasks (Cont.)
+
+
+::: {#fig-hte-questions layout-ncol=1 fig-align="center"}
+![](images/just-do-everything.jpg){width="50%"}
+
+Everyone's favortie collaborator
+:::
+
+
 # Estimation of CATE
 
 ## Identification Assumptions
@@ -323,6 +362,14 @@ In randomized trials, both no unmeasured confounding and positivity assumptions 
 
 However, while SUTVA is often assumed, it can be easily violated. In reality, it is very difficult to guarantee zero interference between two units/patients.
 :::
+:::
+
+##
+
+::: {#fig-causal-assumptions layout-ncol=1 fig-align="center"}
+![](images/causal-assumptions.jpg){width="44%"}
+
+All assumptions are checked! Or are they?
 :::
 
 ## Propensity Score
@@ -428,6 +475,15 @@ Choosing the appropriate methods depends on the HTE tasks one has in mind based 
 :::
 :::
 
+## CATE Estimation Methods (Cont.)
+
+::: {#fig-cate-estimation layout-ncol=1 fig-align="center"}
+![](images/Meta-Learners-Causal-ML.jpg){width="54%"}
+
+United by one (estimation) goal
+:::
+
+
 # Domain-Knowledge Methods
 
 ## Regression with Interaction Terms
@@ -500,6 +556,15 @@ Recall that the regression model we showcased was a special case of the S-learne
 $$\mu_{a}(x) = \alpha + \beta a + \gamma^\top x + \delta^\top (a \cdot x).$$
 :::
 :::
+
+## S-Learner (Cont.)
+
+::: {#fig-change-my-mind layout-ncol=1 fig-align="center"}
+![](images/regression-s-learner.jpg){width="54%"}
+
+Any taker?
+:::
+
 ## T-Learner
 ::: {.fragment}
 Instead of fitting a single model for $\mu_a(x)$, T-learner fits *two* separate outcome models:
@@ -1249,6 +1314,14 @@ For a comprehensive checklist of planning and reporting considerations for HTE a
 :::
 ::: {.fragment}
 - HTE motivates ITR.
+:::
+
+## Take-Home Messages (Cont.)
+
+::: {#fig-take-home layout-ncol=1 fig-align="center"}
+![](images/finishing-short-course.jpg){width="36%"}
+
+Best of luck!
 :::
 
 ## Recommended Sources
