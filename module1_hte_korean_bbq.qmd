@@ -281,7 +281,7 @@ $$\tau(x):=E[Y^*_i(1)-Y^*_i(0)\mid X_i=x].$$
 ::: {.fragment}
 An example interpretation is:
 
-*The CATE at* $X_i = x$ *is the expected difference in outcome i f everyone with characteristics* $x$ *received the treatment versus if everyone with those characteristics did not.*
+*The CATE at* $X_i = x$ *is the expected difference in outcome if everyone with characteristics* $x$ *received the treatment versus if everyone with those characteristics did not.*
 :::
 
 ::: {.fragment}
@@ -351,7 +351,7 @@ Assume $\{Y^*_i(1), Y^*_i(0), A_i, X_i\} \overset{i.i.d.}{\sim} P$ for some dist
 :::
 ## Identification Assumptions (Cont.)
 ::: {.fragment}
-3.  **Positivity (overlap)**: every unit has a positive probability of receiving either treatment. Define the propensity score as $e(x) = P(A_i = 1 \mid X_i = x)$, then
+3.  **Positivity (overlap)**: every unit has a positive probability of receiving either treatment. Define the propensity score as $e(x) := P(A_i = 1 \mid X_i = x)$, then
 
     $$ 0 < e(x) < 1 \quad \text{for all } x \in \textrm{supp}(X_i). $$
 :::
@@ -376,7 +376,7 @@ All assumptions are checked! Or are they?
 ::: {.fragment}
 When $X_i$ is high-dimensional, conditioning on it directly becomes intractable. Instead, we use the *propensity score*:
 
-$$e(X_i) = P(A_i = 1 \mid X_i),$$
+$$e(X_i) := P(A_i = 1 \mid X_i),$$
 
 which captures how likely a unit is to receive treatment given the covariates.
 :::
@@ -1279,7 +1279,7 @@ HTE estimation is powerful but requires careful handling.
 ::: {.fragment}
 - **Poor overlap** — some covariate combinations are rare.
 - **Unmeasured confounding** — violate assumptions.
-- **Noisy subgroup discovery** — overfutting.
+- **Noisy subgroup discovery** — overfitting.
 - **Lack of external validation** — CATE models untested.
 - **Prediction vs. identification tension** — predictive model, biased CATE estimate.
 :::
@@ -1295,13 +1295,13 @@ For a comprehensive checklist of planning and reporting considerations for HTE a
 ## Take-Home Messages
 
 ::: {.fragment}
-- Specify HTE tasks based on research questions.
-:::
-::: {.fragment}
 - CATE describes HTE.
 :::
 ::: {.fragment}
 - Causal assumptions are required for CATE identification.
+:::
+::: {.fragment}
+- Specify HTE tasks based on research questions.
 :::
 ::: {.fragment}
 - Domain-knowledge based CATE estimation requires pre-defined covariates and interactions.

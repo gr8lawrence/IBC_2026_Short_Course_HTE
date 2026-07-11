@@ -771,7 +771,7 @@ Figure&nbsp;4: Definitely worth asking again…
 </div>
 <div class="fragment">
 <p>An example interpretation is:</p>
-<p><em>The CATE at</em> <span class="math inline">\(X_i = x\)</span> <em>is the expected difference in outcome i f everyone with characteristics</em> <span class="math inline">\(x\)</span> <em>received the treatment versus if everyone with those characteristics did not.</em></p>
+<p><em>The CATE at</em> <span class="math inline">\(X_i = x\)</span> <em>is the expected difference in outcome if everyone with characteristics</em> <span class="math inline">\(x\)</span> <em>received the treatment versus if everyone with those characteristics did not.</em></p>
 </div>
 <div class="fragment">
 <div class="callout callout-note callout-titled callout-style-default">
@@ -883,7 +883,7 @@ Figure&nbsp;5: Everyone’s favortie collaborator
 <h2>Identification Assumptions (Cont.)</h2>
 <div class="fragment">
 <ol start="3" type="1">
-<li><p><strong>Positivity (overlap)</strong>: every unit has a positive probability of receiving either treatment. Define the propensity score as <span class="math inline">\(e(x) = P(A_i = 1 \mid X_i = x)\)</span>, then</p>
+<li><p><strong>Positivity (overlap)</strong>: every unit has a positive probability of receiving either treatment. Define the propensity score as <span class="math inline">\(e(x) := P(A_i = 1 \mid X_i = x)\)</span>, then</p>
 <p><span class="math display">\[ 0 &lt; e(x) &lt; 1 \quad \text{for all } x \in \textrm{supp}(X_i). \]</span></p></li>
 </ol>
 </div>
@@ -925,7 +925,7 @@ Figure&nbsp;6: All assumptions are checked! Or are they?
 <h2>Propensity Score</h2>
 <div class="fragment">
 <p>When <span class="math inline">\(X_i\)</span> is high-dimensional, conditioning on it directly becomes intractable. Instead, we use the <em>propensity score</em>:</p>
-<p><span class="math display">\[e(X_i) = P(A_i = 1 \mid X_i),\]</span></p>
+<p><span class="math display">\[e(X_i) := P(A_i = 1 \mid X_i),\]</span></p>
 <p>which captures how likely a unit is to receive treatment given the covariates.</p>
 </div>
 <div class="fragment">
@@ -2354,7 +2354,7 @@ Figure&nbsp;9: The limitations of T-learners. Credits to <span class="citation" 
 <ul>
 <li><strong>Poor overlap</strong> — some covariate combinations are rare.</li>
 <li><strong>Unmeasured confounding</strong> — violate assumptions.</li>
-<li><strong>Noisy subgroup discovery</strong> — overfutting.</li>
+<li><strong>Noisy subgroup discovery</strong> — overfitting.</li>
 <li><strong>Lack of external validation</strong> — CATE models untested.</li>
 <li><strong>Prediction vs.&nbsp;identification tension</strong> — predictive model, biased CATE estimate.</li>
 </ul>
@@ -2379,17 +2379,17 @@ Figure&nbsp;9: The limitations of T-learners. Credits to <span class="citation" 
 <h2>Take-Home Messages</h2>
 <div class="fragment">
 <ul>
-<li>Specify HTE tasks based on research questions.</li>
-</ul>
-</div>
-<div class="fragment">
-<ul>
 <li>CATE describes HTE.</li>
 </ul>
 </div>
 <div class="fragment">
 <ul>
 <li>Causal assumptions are required for CATE identification.</li>
+</ul>
+</div>
+<div class="fragment">
+<ul>
+<li>Specify HTE tasks based on research questions.</li>
 </ul>
 </div>
 <div class="fragment">
