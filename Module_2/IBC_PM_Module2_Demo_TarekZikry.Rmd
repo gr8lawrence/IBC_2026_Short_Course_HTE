@@ -1,0 +1,928 @@
+---
+title: "Simulated Observational Two-Stage DTR Case Study"
+author: "IBC 2026 Short Course"
+date: "July 12, 2026"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: readable
+    df_print: paged
+    code_folding: show
+  pdf_document:
+    toc: true
+subtitle: "IBC 2026 Short Course - Module 2 code demonstration"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  fig.width = 7,
+  fig.height = 4
+)
+set.seed(20260707)
+```
+
+# Setup
+
+```{r libs}
+library(DynTxRegime)
+library(rpart)         
+```
+
+# The clinical scenario and questions of interest
+
+Imagine a chronic condition managed over **two clinic visits**. At each visit the clinician
+chooses between two options:
+
+- **`Control`** --- standard care (lower intensity).
+- **`Intensive`** --- augmented therapy (higher intensity, more burden and cost).
+
+We observe each patient's baseline profile, the treatment actually given at visit 1, an
+**interim risk marker** measured before visit 2, the visit-2 treatment, and a final outcome
+`Y` (a functional / quality-of-life score, coded so **larger is better**).
+
+| Symbol | Variable | Meaning |
+|---|---|---|
+| $X_1$ | `severity` | baseline disease severity (larger = worse) |
+|  | `age_z` | standardized age |
+|  | `comorb` | comorbidity present (0/1) |
+|  | `adherence` | adherence (larger = better) |
+| $A_1$ | `A1` | visit-1 treatment (`Control` / `Intensive`) |
+| $X_2$ | `risk2` | **interim** risk/severity marker after visit 1 (larger = worse) |
+| $A_2$ | `A2` | visit-2 treatment (`Control` / `Intensive`) |
+| $Y$ | `Y` | final health outcome (larger = better) |
+
+**This is observational data, not a randomized trial.** Sicker, higher-risk patients are preferentially given
+`Intensive` care at *both* visits, so the treated and untreated groups are not comparable --- and
+`risk2` is itself pushed down by intensive visit-1 care. The causal structure is
+
+$$X_1 \;\to\; A_1 \;\to\; X_2\,(\texttt{risk2}) \;\to\; A_2 \;\to\; Y,$$
+
+with $X_1$ confounding $A_1$ and $(X_1, A_1, X_2)$ confounding $A_2$. Because `risk2` is
+**both** a consequence of $A_1$ and a confounder of $A_2$, it is a *time-dependent confounder*
+--- the feature that makes the problem genuinely sequential.
+
+**Questions of interest.**
+
+1. **Is the naive analysis biased?** How badly does confounding distort a simple
+   treated-vs-untreated comparison?
+2. **Can we recover the treatment mechanism?** Fit the propensity, check it against the known
+   truth, and ask whether overlap/positivity is adequate --- and how fragile multi-stage
+   weights become.
+3. **What is the optimal two-stage rule --- who gets `Intensive`, and when?** Estimate it two
+   ways: Q-learning (indirect) and AIPW/classification (direct).
+4. **How much does individualizing help,** relative to "always control", "always intensive",
+   and the unattainable oracle?
+5. **How trustworthy are the estimates** --- are in-sample values optimistic, and which methods
+   survive a misspecified model?
+
+# Data-generating process
+
+The observed trajectory is $O=(X_1,A_1,X_2,A_2,Y)$. Because we build the world, we know every
+ingredient a real analysis must *estimate* --- the propensity, the outcome model, and the
+truly optimal rule. The generative model has three pieces.
+
+**1. Treatment assignment (the propensity).** At each visit the probability of `Intensive`
+rises with disease burden --- higher `severity`, `comorb`, and (at visit 2) higher `risk2` ---
+and falls with `adherence`. This is *confounding by indication*: the sickest patients are
+steered toward the aggressive option.
+
+**2. The interim marker.** `risk2` rises with baseline severity but is **lowered by intensive
+visit-1 treatment**, so $A_1$ has a downstream effect that surfaces only through `risk2`.
+
+**3. The outcome and its treatment effects.** The outcome decomposes as
+$$Y \;=\; \underbrace{\mu(X_1,X_2)}_{\text{prognosis}} \;+\; \underbrace{C_1(X_1)}_{\text{blip}_1}\,A_1 \;+\; \underbrace{C_2(H_2)}_{\text{blip}_2}\,A_2 \;+\; \varepsilon,$$
+where each **blip** $C_k$ is the *conditional benefit of `Intensive`* at that stage --- exactly
+the contrast an optimal rule keys on. The blips vary across patients (they depend on severity,
+comorbidity, and interim risk) - hence the need for personalization.
+
+>  $C_k(h_k)$ is the structural-nested-mean-model blip
+> that A-learning and g-estimation target directly, and that Q-learning recovers as its
+> `moCont` contrast. The optimal rule is $d_k^{\mathrm{opt}}(h_k)=\mathbb{I}\{C_k(h_k)>0\}$.
+
+
+> `risk2` is the crux of the multi-stage
+> observational problem: it is **affected by the stage-1 action** (intensive care lowers it),
+> it then **confounds the stage-2 decision** (higher risk $\to$ more intensive), and it
+> **drives the outcome**. A variable that is at once a *mediator* of past treatment and a
+> *confounder* of future treatment cannot be handled by naive regression adjustment --- it is
+> exactly why sequential methods (backward induction, g-estimation, AIPW) exist.
+
+```{r dgp-functions}
+expit <- function(x) 1 / (1 + exp(-x))
+
+tx_levels <- c("Control", "Intensive")
+sigma_x2 <- 0.75
+sigma_y  <- 1.50
+
+make_baseline <- function(n) {
+  severity  <- rnorm(n)
+  age_z     <- rnorm(n)
+  adherence <- rnorm(n)
+  comorb    <- rbinom(n, size = 1, prob = expit(-0.25 + 0.70 * severity + 0.25 * age_z))
+
+  data.frame(
+    id = seq_len(n),
+    severity = severity,
+    age_z = age_z,
+    comorb = comorb,
+    adherence = adherence
+  )
+}
+
+p1_fun <- function(dat) {
+  with(dat, expit(-0.25 + 1.00 * severity + 0.65 * comorb -
+                    0.45 * adherence + 0.20 * age_z))
+}
+
+mu_risk2 <- function(dat, a1_num) {
+  with(dat, 0.55 * severity + 0.45 * comorb - 0.35 * adherence +
+         0.25 * age_z - (0.55 + 0.25 * severity) * a1_num)
+}
+
+p2_fun <- function(dat) {
+  with(dat, expit(-0.30 + 1.15 * risk2 + 0.35 * severity +
+                    0.50 * comorb - 0.35 * a1_num - 0.20 * adherence))
+}
+
+blip1_fun <- function(dat) {
+  with(dat, -0.20 + 0.90 * severity + 0.50 * comorb - 0.40 * adherence)
+}
+
+blip2_fun <- function(dat) {
+  with(dat, -0.35 + 1.10 * risk2 + 0.35 * severity +
+         0.45 * comorb - 0.25 * a1_num)
+}
+
+mean_y_fun <- function(dat) {
+  with(dat, 24 - 1.80 * severity - 1.20 * risk2 - 1.00 * comorb +
+         0.30 * adherence - 0.20 * age_z +
+         blip1_fun(dat) * a1_num + blip2_fun(dat) * a2_num)
+}
+
+expected_positive_normal <- function(mu, sd) {
+  z <- mu / sd
+  sd * dnorm(z) + mu * pnorm(z)
+}
+
+stage1_value_if <- function(dat, a1_num) {
+  mu2 <- mu_risk2(dat, a1_num = a1_num)
+  mean_blip2 <- with(dat, -0.35 + 1.10 * mu2 + 0.35 * severity +
+                       0.45 * comorb - 0.25 * a1_num)
+  sd_blip2 <- abs(1.10) * sigma_x2
+  mean_base <- with(dat, 24 - 1.80 * severity - 1.20 * mu2 - 1.00 * comorb +
+                      0.30 * adherence - 0.20 * age_z)
+
+  mean_base + blip1_fun(dat) * a1_num +
+    expected_positive_normal(mean_blip2, sd_blip2)
+}
+
+oracle_a1 <- function(dat) {
+  as.integer(stage1_value_if(dat, 1) > stage1_value_if(dat, 0))
+}
+
+oracle_a2 <- function(dat) {
+  as.integer(blip2_fun(dat) > 0)
+}
+
+tx_factor <- function(a) {
+  factor(ifelse(a == 1, "Intensive", "Control"), levels = tx_levels)
+}
+```
+
+```{r simulate-observed}
+simulate_observational_data <- function(n, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+
+  dat <- make_baseline(n)
+
+  dat$p1_true <- p1_fun(dat)
+  dat$a1_num <- rbinom(n, size = 1, prob = dat$p1_true)
+  dat$A1 <- tx_factor(dat$a1_num)
+
+  dat$risk2 <- mu_risk2(dat, dat$a1_num) + rnorm(n, sd = sigma_x2)
+
+  dat$p2_true <- p2_fun(dat)
+  dat$a2_num <- rbinom(n, size = 1, prob = dat$p2_true)
+  dat$A2 <- tx_factor(dat$a2_num)
+
+  dat$blip1_true <- blip1_fun(dat)
+  dat$blip2_true <- blip2_fun(dat)
+  dat$d1_oracle <- tx_factor(oracle_a1(dat))
+  dat$d2_oracle <- tx_factor(oracle_a2(dat))
+
+  dat$Y_mean <- mean_y_fun(dat)
+  dat$Y <- dat$Y_mean + rnorm(n, sd = sigma_y)
+
+  dat
+}
+
+n_train <- 1500
+obs <- simulate_observational_data(n_train, seed = 101)
+
+str(obs)
+summary(obs$Y)
+```
+
+# The oracle: the true optimal regime
+
+Because we created the data-generating process, we can compute the **oracle** --- the regime
+that is optimal --- and use it as the benchmark no estimator should beat. It was already built above (`oracle_a1`,
+`oracle_a2`, stored per patient as `d1_oracle` / `d2_oracle`); this section explains why/how those
+functions take the form they do.
+
+The outcome was constructed in **blip form**, so the treatment effect at each stage is an
+explicit function of history:
+$$Y = \mu(X_1,X_2) + \text{blip}_1(X_1)\,A_1 + \text{blip}_2(H_2)\,A_2 + \varepsilon .$$
+Each blip *is* the treatment contrast, so "treat wherever the blip is positive" is optimal ---
+but only the last stage is that simple.
+
+**Stage 2 (the final decision).** `Y` is linear in `A2` with slope $\text{blip}_2(H_2)$, so
+`Intensive` helps exactly where that blip is positive:
+$$d_2^{\mathrm{opt}}(H_2)=\mathbb{I}\{\text{blip}_2(H_2)>0\}\qquad(\texttt{oracle\_a2}).$$
+
+**Stage 1 (backward induction).** Choosing `A1` also shifts `risk2` (through `mu_risk2`), and
+`risk2` drives both the prognosis and `blip2` --- the time-dependent-confounder pathway --- so
+the stage-1 optimum has to look ahead to how we will act at stage 2. Its value is
+$$V_1(H_1,a_1)=\mathbb{E}\!\left[\ \mu + \text{blip}_1\,a_1 + \underbrace{\max_{a_2}\text{blip}_2\,a_2}_{=\,(\text{blip}_2)_+}\ \middle|\ H_1,a_1\right],$$
+where the expectation is over the still-random $\text{risk2}\sim N\!\big(\mu_{\text{risk2}}(X_1,a_1),\,\sigma_{x2}\big)$.
+Two facts make this **closed form**:
+
+- $\mu$ is *linear* in `risk2`, so $\mathbb{E}[\mu]$ is just $\mu$ evaluated at its mean $\mu_{\text{risk2}}$;
+- $\text{blip}_2$ is *linear* in `risk2`, so $\text{blip}_2\sim N$ and the
+  $\mathbb{E}[(\text{blip}_2)_+]$ is the normal **expected-positive-part**,
+  $\sigma\,\phi(\mu/\sigma)+\mu\,\Phi(\mu/\sigma)$ --- exactly `expected_positive_normal`.
+
+`stage1_value_if` assembles these three pieces, and the rule picks whichever visit-1 action has
+the higher look-ahead value:
+$$d_1^{\mathrm{opt}}(H_1)=\mathbb{I}\{V_1(H_1,1)>V_1(H_1,0)\}\qquad(\texttt{oracle\_a1}).$$
+
+How often does the oracle send patients to `Intensive` at each visit?
+
+```{r oracle-summary}
+rbind(stage1 = table(obs$d1_oracle),
+      stage2 = table(obs$d2_oracle))
+```
+
+Downstream we score every learned rule against `d1_oracle` / `d2_oracle` (rule agreement) and
+run `policy_oracle` through the DGP to get the oracle **value** --- the ceiling the estimators
+are trying to reach.
+
+# Confounding in observational data
+
+The treatment mechanism is not randomized - sicker patients are more likely to receive `Intensive` at both
+visits.
+
+
+```{r confounding-picture, fig.width=10, fig.height=3.6}
+par(mfrow = c(1, 3))
+boxplot(severity ~ A1, data = obs, col = c("grey85", "#377EB8"),
+        main = "Who gets Intensive at visit 1?", xlab = "", ylab = "baseline severity (higher = sicker)")
+boxplot(risk2 ~ A2, data = obs, col = c("grey85", "#377EB8"),
+        main = "Who gets Intensive at visit 2?", xlab = "", ylab = "interim risk2 (higher = worse)")
+boxplot(Y ~ A1, data = obs, col = c("grey85", "#377EB8"),
+        main = "Naive outcome comparison", xlab = "", ylab = "Y (higher = better)")
+```
+
+The `Intensive` arms are sicker at *both* stages, and --- because
+of that --- naively appear to do *worse*. We must condition on the history used to assign treatment!
+
+```{r propensity-plots, fig.width=8, fig.height=3.5}
+par(mfrow = c(1, 2))
+hist(obs$p1_true, breaks = 25, col = "grey85",
+     main = "True stage-1 propensity",
+     xlab = expression(P(A[1] == Intensive ~ "|" ~ H[1])))
+hist(obs$p2_true, breaks = 25, col = "grey85",
+     main = "True stage-2 propensity",
+     xlab = expression(P(A[2] == Intensive ~ "|" ~ H[2])))
+```
+
+# Estimate the propensity --- and check it against the truth
+
+The direct method (AIPW/classification) needs the propensity
+$\pi_k(a_k\mid h_k)=P(A_k=\text{Intensive}\mid H_k)$. We estimate a **logistic model at each
+stage** --- stage 2 conditions on the treatment-affected interim marker:
+$$\operatorname{logit}\pi_1(H_1)=\gamma_{10}+\gamma_{11}^{\top}X_1,\qquad X_1=(\text{severity, age, comorb, adherence}),$$
+$$\operatorname{logit}\pi_2(H_2)=\gamma_{20}+\gamma_{21}^{\top}H_2,\qquad H_2=(X_1,\;A_1,\;\text{risk2}).$$
+In real data you can only *estimate* these, and you must pick a specification **without** a
+truth to check against. To show how, we fit the correct stage-2 model **and a plausible but
+misspecified one** (dropping `severity`, `comorb`, and the interim `risk2`), then (i) confirm
+both against the known propensity, and (ii) --- pretending we did *not* know it --- choose
+between them with data-driven diagnostics.
+
+
+```{r ps-fit}
+# correct AND misspecified logistic models at EACH stage
+ps1_correct <- glm(a1_num ~ severity + age_z + comorb + adherence,             family = binomial, data = obs)
+ps1_wrong   <- glm(a1_num ~ age_z + adherence,                                 family = binomial, data = obs)  # drops severity, comorb
+ps2_correct <- glm(a2_num ~ severity + age_z + comorb + adherence + A1 + risk2, family = binomial, data = obs)
+ps2_wrong   <- glm(a2_num ~ age_z + adherence + A1,                             family = binomial, data = obs)  # drops severity, comorb, risk2
+
+obs$p1_correct <- fitted(ps1_correct);  obs$p1_wrong <- fitted(ps1_wrong)
+obs$p2_correct <- fitted(ps2_correct);  obs$p2_wrong <- fitted(ps2_wrong)
+obs$p1_hat <- obs$p1_correct            # the CORRECT models feed the methods downstream
+obs$p2_hat <- obs$p2_correct
+```
+
+## Check against the truth (only possible in a simulation)
+
+```{r ps-vs-truth, fig.width=8, fig.height=7}
+calib <- function(truth, est, main) {
+  plot(truth, est, pch = 16, cex = 0.5, col = rgb(0, 0, 0, 0.3),
+       xlab = "true propensity", ylab = "estimated", xlim = c(0, 1), ylim = c(0, 1), main = main)
+  abline(0, 1, col = "red", lwd = 2)
+}
+par(mfrow = c(2, 2))
+calib(obs$p1_true, obs$p1_correct, "Stage 1 (correct)")
+calib(obs$p1_true, obs$p1_wrong,   "Stage 1 (misspecified)")
+calib(obs$p2_true, obs$p2_correct, "Stage 2 (correct)")
+calib(obs$p2_true, obs$p2_wrong,   "Stage 2 (misspecified)")
+```
+
+
+## Choosing the model *without* the truth
+
+In practice you never see the red line. A propensity model is judged two ways: ordinary **fit**
+(e.g. AIC) and --- the purpose-built criterion --- the **covariate balance** it buys after
+weighting. A good model makes the weighted treatment arms look alike; a model that omits a
+confounder leaves that confounder imbalanced.
+
+```{r ps-diagnostics, fig.width=9, fig.height=3.6}
+aic <- c(correct = AIC(ps2_correct), misspecified = AIC(ps2_wrong))    # (1) fit: lower is better
+
+# (2) residual check: binned residuals vs the omitted driver risk2 (analog of the Q-learning plot)
+binned <- function(x, r, main, nb = 20) {
+  b  <- cut(x, unique(quantile(x, seq(0, 1, length.out = nb + 1))), include.lowest = TRUE)
+  xm <- tapply(x, b, mean); rm <- tapply(r, b, mean)
+  plot(xm, rm, pch = 16, xlab = "risk2", ylab = "mean residual (A2 - p_hat)", main = main)
+  abline(h = 0, col = "grey50"); lines(lowess(xm, rm), col = "red", lwd = 2)
+}
+par(mfrow = c(1, 2))
+binned(obs$risk2, obs$a2_num - obs$p2_wrong,   "Misspecified: binned resid vs risk2")
+binned(obs$risk2, obs$a2_num - obs$p2_correct, "Correct: binned resid vs risk2")
+round(aic, 1)
+```
+
+# Multi-stage IPW weights get fragile
+
+Inverse-probability weighting reweights each patient by $1/\pi$ so the treated look like the
+whole population. In a *sequence* the weight is the **product** across stages,
+$1/\{\pi_1(a_1\mid h_1)\,\pi_2(a_2\mid h_2)\}$ --- and a product of small numbers has a heavy
+right tail. A few patients on an unlikely treatment path acquire enormous weights and dominate
+any IPW estimate.
+
+> Each extra stage multiplies another
+> $1/\pi$ into the weight, so the effective sample shrinks geometrically --- the motivation for
+> stabilized weights, augmentation (AIPW), or avoiding full-product inversion altogether.
+
+```{r ipw-fragility, fig.width=8, fig.height=3.6}
+# weight of each patient's OBSERVED path, using the fitted propensities
+pi1_obs <- with(obs, ifelse(a1_num == 1, p1_hat, 1 - p1_hat))
+pi2_obs <- with(obs, ifelse(a2_num == 1, p2_hat, 1 - p2_hat))
+w1 <- 1 / pi1_obs                        # stage-1 weight only
+w2 <- 1 / (pi1_obs * pi2_obs)            # cumulative two-stage weight
+
+ess       <- function(w) sum(w)^2 / sum(w^2)                                   # Kish effective sample size
+top_share <- function(w, p = 0.01) sum(sort(w, TRUE)[seq_len(ceiling(p * length(w)))]) / sum(w)
+
+round(c(
+  n             = nrow(obs),
+  ESS_stage1    = ess(w1),
+  ESS_two_stage = ess(w2),
+  max_weight    = max(w2),
+  top1pct_share = top_share(w2)          # weight share held by the heaviest 1% of patients
+), 2)
+
+par(mfrow = c(1, 2))
+hist(w2,        breaks = 40, col = "grey85", main = "Cumulative IPW weight", xlab = "1 / (pi1 * pi2)")
+hist(log10(w2), breaks = 40, col = "grey85", main = "... on a log scale",     xlab = "log10 weight")
+```
+
+**Interpretation.** The effective sample size drops from $n$ toward a fraction of it once the
+second stage folds in, the maximum weight dwarfs the average, and the heaviest 1% of patients
+carry an outsized share of the total. That is *why* a raw multi-stage IPW value is noisy ---
+and why the direct method below leans on **augmentation** (AIPW) instead of
+inverting the whole propensity product at once.
+
+# Fit Q-learning
+
+Q-learning models the outcome regression at each stage as a **main effect plus a treatment
+contrast** (the blip), and reads the rule off the contrast. **Stage 2** (solved first):
+$$Q_2(H_2,a_2)=\mathbb{E}[Y\mid H_2,A_2=a_2]=\nu_2(H_2)+a_2\,C_2(H_2),\qquad d_2^{\mathrm{opt}}(H_2)=\mathbb{I}\{\widehat C_2(H_2)>0\},$$
+$$V_2(H_2)=\max_{a_2}Q_2(H_2,a_2)=\nu_2(H_2)+\max\{0,\,C_2(H_2)\}.$$
+**Stage 1** regresses that optimal *future* value on the baseline history:
+$$Q_1(H_1,a_1)=\mathbb{E}[V_2\mid H_1,A_1=a_1]=\nu_1(H_1)+a_1\,C_1(H_1),\qquad d_1^{\mathrm{opt}}(H_1)=\mathbb{I}\{\widehat C_1(H_1)>0\}.$$
+
+> Solve the *last* decision first, then step back; in
+> code, the stage-2 fit is passed as the `response` for stage 1, carrying the pseudo-outcome
+> $V_2=\max_{a_2}Q_2$ backward. Only the **contrast** (`moCont`) terms decide the rule.
+
+## Choosing the stage-2 outcome model
+
+The rule is only as good as the $Q_2$ model beneath it, so we check it first. We compare two
+candidate specifications with standard linear-model diagnostics. Both write the stage-2
+Q-function as a main effect plus an `A2` contrast, $Q_2=\nu_2+a_2C_2$ (with $a_2=1$ for
+`Intensive`).
+
+*Correct* (matches the DGP):
+$$
+\begin{aligned}
+Q_2(H_2,a_2)=\;& \beta_0+\beta_1\,\text{sev}+\beta_2\,\text{age}+\beta_3\,\text{com}+\beta_4\,\text{adh}+\beta_5\,a_1+\beta_6\,\text{risk2}\\
+&+\,a_2\big(\psi_0+\psi_1\,\text{sev}+\psi_2\,\text{com}+\psi_3\,\text{adh}+\psi_4\,a_1+\psi_5\,\text{risk2}\big).
+\end{aligned}
+$$
+
+*Misspecified* (`age` and `adherence` only --- drops `severity`, `comorb`, `A1`, and `risk2`
+from both parts):
+$$
+Q_2(H_2,a_2)=\big(\beta_0+\beta_1\,\text{age}+\beta_2\,\text{adh}\big)+a_2\big(\psi_0+\psi_1\,\text{age}+\psi_2\,\text{adh}\big).
+$$
+
+(Abbreviations: sev = `severity`, age = `age_z`, com = `comorb`, adh = `adherence`; $a_1,a_2=1$
+for `Intensive`.)
+
+```{r q2-model-check, fig.width=9, fig.height=6}
+f_correct <- Y ~ severity + age_z + comorb + adherence + A1 + risk2 +
+                 A2 + A2:severity + A2:comorb + A2:adherence + A2:A1 + A2:risk2
+f_wrong   <- Y ~ age_z + adherence + A2 + A2:age_z + A2:adherence
+
+m_correct <- lm(f_correct, data = obs)
+m_wrong   <- lm(f_wrong,   data = obs)
+
+data.frame(                                     # numeric model-fit comparison
+  model  = c("correct", "misspecified"),
+  adj_R2 = round(c(summary(m_correct)$adj.r.squared, summary(m_wrong)$adj.r.squared), 3),
+  AIC    = round(c(AIC(m_correct), AIC(m_wrong)), 1)
+)
+
+# residual diagnostics: is there leftover structure the model failed to capture?
+rvf <- function(m, lab) {
+  plot(fitted(m), resid(m), pch = 16, cex = 0.4, col = rgb(0,0,0,0.3),
+       xlab = "fitted", ylab = "residual", main = lab)
+  abline(h = 0, col = "grey50"); lines(lowess(fitted(m), resid(m)), col = "red", lwd = 2)
+}
+rvx <- function(m, lab) {
+  plot(obs$risk2, resid(m), pch = 16, cex = 0.4, col = rgb(0,0,0,0.3),
+       xlab = "risk2 (an omitted driver)", ylab = "residual", main = lab)
+  abline(h = 0, col = "grey50"); lines(lowess(obs$risk2, resid(m)), col = "red", lwd = 2)
+}
+par(mfrow = c(2, 2))
+rvf(m_wrong,   "Misspecified: resid vs fitted")
+rvx(m_wrong,   "Misspecified: resid vs risk2")
+rvf(m_correct, "Correct: resid vs fitted")
+rvx(m_correct, "Correct: resid vs risk2")
+```
+
+The misspecified model has a lower adjusted $R^2$, a much higher AIC, and a clear pattern in the residuals. The correct model's residuals are flat against both fitted values and `risk2`. We proceed with the correct specification, which is exactly the
+`moMain2`/`moCont2` handed to `qLearn` next.
+
+## Backward fit
+
+Stage 2 fits the **correct** $Q_2$ chosen above (`moMain2` $=\nu_2$, `moCont2` $=C_2$); its
+optimal value $\widehat V_2$ is then carried back as the response for stage 1.
+
+```{r qlearn-stage2}
+moMain2 <- buildModelObj(
+  model = ~ severity + age_z + comorb + adherence + A1 + risk2,
+  solver.method = "lm"
+)
+
+moCont2 <- buildModelObj(
+  model = ~ severity + comorb + adherence + A1 + risk2,
+  solver.method = "lm"
+)
+
+qSS <- qLearn(
+  moMain = moMain2,
+  moCont = moCont2,
+  data = obs,
+  response = obs$Y,
+  txName = "A2",
+  verbose = FALSE
+)
+
+coef(qSS)
+```
+
+Stage 1 regresses that stage-2 optimal value $\widehat V_2$ (the `qSS` object) on the baseline
+history, again as a main effect plus an `A1` contrast, $Q_1=\nu_1+a_1C_1$:
+$$
+\begin{aligned}
+Q_1(H_1,a_1)=\;& \alpha_0+\alpha_1\,\text{sev}+\alpha_2\,\text{age}+\alpha_3\,\text{com}+\alpha_4\,\text{adh}\\
+&+\,a_1\big(\phi_0+\phi_1\,\text{sev}+\phi_2\,\text{age}+\phi_3\,\text{com}+\phi_4\,\text{adh}\big).
+\end{aligned}
+$$
+
+```{r qlearn-stage1}
+moMain1 <- buildModelObj(
+  model = ~ severity + age_z + comorb + adherence,
+  solver.method = "lm"
+)
+
+moCont1 <- buildModelObj(
+  model = ~ severity + age_z + comorb + adherence,
+  solver.method = "lm"
+)
+
+qFS <- qLearn(
+  moMain = moMain1,
+  moCont = moCont1,
+  data = obs,
+  response = qSS,
+  txName = "A1",
+  verbose = FALSE
+)
+
+coef(qFS)
+estimator(qFS)
+```
+
+**Reading the fit.** The `moCont2` contrast coefficients recover the stage-2 blip: `Intensive`
+is favored where that contrast is positive --- here, for higher `risk2` and `severity`, i.e.
+sicker patients. The stage-1 contrast will *not* exactly equal `blip1`, because the true
+stage-1 effect also carries the downstream value of lowering `risk2`; `estimator(qFS)` is the
+in-sample plug-in value.
+
+# Fit the direct AIPW method (classification perspective)
+
+This method targets the **value** of a regime and searches for the best one,
+$$V(d)=\mathbb{E}\!\left[Y^{*}(d)\right],\qquad d^{\mathrm{opt}}=\operatorname*{argmax}_{d}V(d).$$
+
+**Step 1 --- the AIPW (doubly robust) value.** For a *fixed* rule $d$, estimate its value by
+augmented inverse-probability weighting, which uses **both** the propensity $\pi$ and an outcome
+regression $\widehat Q(X,a)=\mathbb{E}[Y\mid X,A=a]$:
+$$
+\widehat V_{\mathrm{AIPW}}(d)=\frac1n\sum_i\left[\frac{C_{d,i}\,Y_i}{\pi_{d,i}}-\frac{C_{d,i}-\pi_{d,i}}{\pi_{d,i}}\,\widehat Q\!\big(X_i,d(X_i)\big)\right],\qquad C_{d,i}=\mathbb{I}\{A_i=d(X_i)\},
+$$
+with $\pi_{d,i}=\widehat P\{A_i=d(X_i)\mid X_i\}$. It is **doubly robust** --- consistent if
+*either* $\pi$ or $\widehat Q$ is correct.
+
+**Step 2 --- a doubly robust contrast per patient.** The same two ingredients give each patient
+an AIPW estimate of their individual benefit of `Intensive`:
+$$
+\widehat C_i=\underbrace{\widehat Q(X_i,\text{Int})-\widehat Q(X_i,\text{Ctrl})}_{\text{outcome-model contrast}}\;+\;\underbrace{\frac{A_i-\widehat\pi(X_i)}{\widehat\pi(X_i)\{1-\widehat\pi(X_i)\}}\big\{Y_i-\widehat Q(X_i,A_i)\big\}}_{\text{propensity-weighted residual}}.
+$$
+If $\widehat Q$ is right the residual term vanishes in expectation; if $\widehat\pi$ is right the
+residual corrects $\widehat Q$ --- doubly robust either way.
+
+**Step 3 --- recast as weighted classification.** Zhang et al. (2012) show maximizing
+$\widehat V_{\mathrm{AIPW}}(d)$ is *equivalent* to a weighted classification: give each patient
+the **label** $\operatorname{sign}\widehat C_i$ (the treatment that looks better) and the
+**weight** $|\widehat C_i|$ (how much it matters), then solve
+$$
+\widehat d=\operatorname*{argmin}_{d}\sum_i |\widehat C_i|\;\mathbb{I}\{d(X_i)\neq\operatorname{sign}\widehat C_i\}.
+$$
+
+**Where the tree comes in.** That last line is an *ordinary weighted classification*, so it is
+handed to a classifier. `DynTxRegime`'s `optimalClass()` does exactly this: the **propensity**
+`moPropen` and **outcome** `moMain`/`moCont` models build $\widehat C_i$ (Steps 1–2), and the
+**classifier** `moClass` is trained on $\{X_i,\ \operatorname{sign}\widehat C_i,\ |\widehat C_i|\}$
+and *becomes* the rule (Step 3). We use a **decision tree** (`rpart`, set in `mk_class()` below),
+so the boundary is a staircase of axis-aligned splits (see the rule map); a logistic/SVM
+classifier would give a different-shaped boundary. **The double robustness lives in the AIPW
+labels and weights --- not in the tree.**
+
+So "**AIPW**" here is shorthand for this whole *AIPW-weighted classification* procedure (Zhang
+et al. 2012), not the bare value estimator. For the two-stage problem it is applied **backward**,
+with $Y$ replaced at each stage by the estimated optimal future value. It needs a propensity
+model at **each** stage; the specifications below match the mechanism that generated the data.
+
+Following the `DynTxRegime` package, the fit is
+defined by four model objects:
+
+- **`moPropen`** --- model and fitting method for the **propensity for treatment**
+  $\pi_k(a_k\mid H_k)$ (here a logistic `glm`).
+- **`moMain`** --- the **main-effects** component of the outcome regression, $\nu_k(H_k)$.
+- **`moCont`** --- the **contrasts** component of the outcome regression, $C_k(H_k)$.
+- **`moClass`** --- the **classifier** trained on the weighted labels (a decision tree here).
+
+Together `moMain` + `moCont` are the outcome model $Q_k=\nu_k+a_kC_k$ that supplies the AIPW
+**augmentation**. *"NULL is acceptable input if IPW is desired"* ---
+i.e. **omit `moMain`/`moCont`** and `optimalClass` reduces to plain **IPW**; **add them** and the
+contrast weights become **AIPW** (doubly robust). 
+
+```{r oc-setup}
+# propensity models (moPropen), one per stage
+moProp1 <- buildModelObj(model = ~ severity + age_z + comorb + adherence,
+                         solver.method = "glm", solver.args = list(family = "binomial"),
+                         predict.method = "predict.glm", predict.args = list(type = "response"))
+moProp2 <- buildModelObj(model = ~ severity + age_z + comorb + adherence + A1 + risk2,
+                         solver.method = "glm", solver.args = list(family = "binomial"),
+                         predict.method = "predict.glm", predict.args = list(type = "response"))
+
+# classifier (moClass): the decision tree that fits the rule to the weighted labels
+mk_class <- function(f) buildModelObj(model = f, solver.method = "rpart",
+                                      solver.args = list(method = "class", control = rpart.control(cp = 0.01)),
+                                      predict.args = list(type = "class"))
+moClass2 <- mk_class(~ severity + comorb + adherence + A1 + risk2)
+moClass1 <- mk_class(~ severity + age_z + comorb + adherence)
+```
+
+The two calls below are *identical* except that the AIPW
+version adds `moMain` + `moCont`. Afterward we use the package's own extractors to *confirm* the
+difference: `outcome()` shows the AIPW fit carries an outcome-regression (the augmentation) while
+the IPW fit does not, and `classif()` returns the fitted decision tree, which we draw below.
+
+```{r oc-ipw}
+## IPW  ---  moPropen + moClass only, NO outcome model  (cf. fitSS_IPW, manual p.33)
+ipwSS <- optimalClass(moPropen = moProp2, moClass = moClass2,          # <- no moMain / moCont
+                      data = obs, response = obs$Y, txName = "A2", verbose = FALSE)
+ipwFS <- optimalClass(moPropen = moProp1, moClass = moClass1,          # <- no moMain / moCont
+                      data = obs, response = ipwSS, txName = "A1", verbose = FALSE)
+```
+
+```{r oc-aipw}
+## AIPW ---  the SAME call, PLUS the outcome models  (cf. fitSS_AIPW, manual p.33)
+ocSS <- optimalClass(moPropen = moProp2,
+                     moMain = moMain2, moCont = moCont2,               # <- ADD outcome model => AIPW
+                     moClass = moClass2,
+                     data = obs, response = obs$Y, txName = "A2", verbose = FALSE)
+ocFS <- optimalClass(moPropen = moProp1,
+                     moMain = moMain1, moCont = moCont1,               # <- ADD outcome model => AIPW
+                     moClass = moClass1,
+                     data = obs, response = ocSS, txName = "A1", verbose = FALSE)
+```
+
+```{r oc-inspect}
+# package fingerprint of IPW vs AIPW: does the fit carry an OUTCOME regression?
+outcome(ipwSS)     # IPW  -> no augmentation model
+outcome(ocSS)      # AIPW -> the outcome regression used to augment the weights
+```
+
+The fitted rule *is* a decision tree --- `classif()` returns it, so we can draw it.
+
+```{r oc-tree, fig.width=9, fig.height=6}
+oc_tree <- classif(ocSS)          # classif() returns the fitted rpart tree
+if (requireNamespace("rpart.plot", quietly = TRUE)) {
+  rpart.plot::rpart.plot(oc_tree, type = 2, extra = 8, box.palette = "Blues",
+                         main = "AIPW stage-2 rule: fitted classification tree")
+} else {
+  plot(oc_tree, uniform = TRUE, margin = 0.10,
+       main = "AIPW stage-2 rule: fitted classification tree")   # base-R fallback
+  text(oc_tree, use.n = TRUE, all = FALSE, cex = 0.7)
+}
+```
+
+*(Leaves are labelled `0` = Control, `1` = Intensive with the fitted class probability; the
+splits on `risk2`, `severity`, `A1`, and `adherence` are the axis-aligned cuts that make the
+decision-region map a staircase. The tree is deep because `cp = 0.01` --- raise `cp` in
+`mk_class()` for a shallower, more legible display.)*
+
+```{r oc-compare}
+# everything else is shared -> the ONLY difference is the moMain/moCont augmentation
+data.frame(
+  fit   = c("IPW  (moPropen + moClass)", "AIPW (+ moMain + moCont)"),
+  value = round(c(estimator(ipwFS), estimator(ocFS)), 2)
+)
+sum(is.na(optTx(ipwFS)$optimalTx))                                   # IPW: patients left with NO recommendation
+mean(optTx(ipwFS)$optimalTx == optTx(ocFS)$optimalTx, na.rm = TRUE)  # agreement where both are defined
+```
+
+**Benefit of augmentation.** The two fits share the same propensity, same
+classifier, same data --- and differ only in the two lines that add `moMain`/`moCont`. The effect
+is significant: the pure-**IPW** value estimate **blows up to $\approx 45$** (the true optimum is
+$\approx 24.5$), it leaves **651 of the 1500 patients ($\approx 43\%$) with no recommendation**
+(`NA`), and where it *is* defined it agrees with the AIPW rule only $\approx 57\%$ of the time.
+This is the inverse-probability-weighting fragility from earlier, now *inside* the estimator: a
+few near-0/1 propensities make the weights explode and the backward coarsening discards nearly
+half the sample. 
+
+Adding the outcome augmentation (**AIPW**) stabilizes the value to $\approx 24.7$
+and defines the rule for **everyone** by imputing the counterfactual outcome via a model. We carry the AIPW fit (`ocSS`/`ocFS`)
+forward; `optTx()` reads off the recommendation --- `optTx(fit)` on the training data,
+`optTx(fit, newdata = ...)` for new patients --- which is how we build the rule map and the
+policy evaluations later.
+
+> **Why does IPW leave patients without a recommendation?** A backward-step artifact, not a bug.
+> To learn the *stage-1* rule, each patient's response is their value *if they then act optimally
+> at stage 2* ($\widehat V_2$). Under pure IPW (no `moMain`/`moCont`) that value can only be
+> *observed* for patients whose actual stage-2 treatment **matched the estimated stage-2 rule**
+> (the "rule-consistent" ones). The rest took a different stage-2 action, so their optimal-path
+> outcome was never seen and IPW has nothing to fill it in with --- they are **coarsened out** of
+> the stage-1 fit and returned as `NA` (here $\approx 43\%$, because stage-2 treatment is
+> $\approx$ 50/50 and the estimated rule matches the observed action only $\approx 57\%$ of the
+> time). This is exactly why `DynTxRegime` frames the IPW estimator as the *coarsened / missing
+> data* perspective. The outcome model in AIPW **imputes** that counterfactual future value, so
+> every patient contributes to the stage-1 fit and every patient gets a rule --- something,
+> beyond double robustness, that the augmentation buys.
+
+
+# Evaluate policies under the known data-generating process
+
+Since we are working under a simulation, we can evaluate a learned policy by
+deploying it in the known data-generating process on a large new population.
+
+```{r policy-evaluation-functions}
+predict_intensive <- function(obj, newdata) {
+  rec <- as.character(optTx(obj, newdata = newdata)$optimalTx)
+  out <- as.integer(rec == "Intensive")
+  out[is.na(out)] <- 0L      # default any undefined recommendation to Control (defensive)
+  out
+}
+
+simulate_policy_value <- function(n, policy, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+
+  dat <- make_baseline(n)
+  # placeholder tx / intermediate columns so optTx(newdata=) always has the columns it expects
+  dat$A1 <- factor("Control", levels = tx_levels)
+  dat$A2 <- factor("Control", levels = tx_levels)
+  dat$risk2 <- 0
+
+  dat$a1_num <- policy$d1(dat)                     # stage-1 rule: baseline history only
+  dat$A1 <- tx_factor(dat$a1_num)
+
+  dat$risk2 <- mu_risk2(dat, dat$a1_num) + rnorm(n, sd = sigma_x2)
+
+  dat$a2_num <- policy$d2(dat)                     # stage-2 rule: (baseline, A1, risk2)
+  dat$A2 <- tx_factor(dat$a2_num)
+
+  dat$Y_mean <- mean_y_fun(dat)
+  dat$Y <- dat$Y_mean + rnorm(n, sd = sigma_y)
+
+  mean(dat$Y)
+}
+
+policy_control   <- list(d1 = function(dat) rep(0L, nrow(dat)),  d2 = function(dat) rep(0L, nrow(dat)))
+policy_intensive <- list(d1 = function(dat) rep(1L, nrow(dat)),  d2 = function(dat) rep(1L, nrow(dat)))
+policy_oracle    <- list(d1 = function(dat) oracle_a1(dat),      d2 = function(dat) oracle_a2(dat))
+policy_q         <- list(d1 = function(dat) predict_intensive(qFS, dat),   d2 = function(dat) predict_intensive(qSS, dat))
+policy_oc        <- list(d1 = function(dat) predict_intensive(ocFS, dat),  d2 = function(dat) predict_intensive(ocSS, dat))
+```
+
+```{r policy-values}
+n_eval      <- 50000
+seed_common <- 2026     
+
+policy_values <- data.frame(
+  policy = c(
+    "Observed treatment pattern",
+    "Always control",
+    "Always intensive",
+    "Oracle policy",
+    "Q-learning policy",
+    "AIPW policy"
+  ),
+  value = c(
+    mean(obs$Y),
+    simulate_policy_value(n_eval, policy_control,   seed = seed_common),
+    simulate_policy_value(n_eval, policy_intensive, seed = seed_common),
+    simulate_policy_value(n_eval, policy_oracle,    seed = seed_common),
+    simulate_policy_value(n_eval, policy_q,         seed = seed_common),
+    simulate_policy_value(n_eval, policy_oc,        seed = seed_common)
+  )
+)
+
+policy_values$value <- round(policy_values$value, 2)
+policy_values
+```
+
+
+```{r optimism}
+# in-sample estimator() (what each method reports) vs the rule's TRUE value under the DGP
+optimism <- data.frame(
+  method     = c("Q-learning", "AIPW"),
+  in_sample  = round(c(estimator(qFS), estimator(ocFS)), 2),
+  true_value = policy_values$value[match(
+    c("Q-learning policy", "AIPW policy"), policy_values$policy)]
+)
+optimism$optimism_gap <- round(optimism$in_sample - optimism$true_value, 2)
+optimism
+```
+
+
+```{r policy-value-plot}
+op <- par(mar = c(7, 4, 2, 1))
+ylo <- floor(min(policy_values$value) * 2) / 2 - 0.5     # zoom so small differences are legible
+barplot(
+  policy_values$value,
+  names.arg = policy_values$policy,
+  las = 2,
+  col = c("grey75", "grey85", "grey85", "#4DAF4A", "#377EB8", "#984EA3"),
+  ylab = "Monte Carlo value",
+  ylim = c(ylo, max(policy_values$value) + 0.3), xpd = FALSE,
+  main = "Policy value under the known DGP"
+)
+par(op)
+```
+
+# Double robustness: break one model at a time
+
+Correctly specified nuisances (everything above) are the best case. AIPW is *doubly robust* --- consistent if
+*either* the propensity or the outcome model is right. Q-learning has no propensity, so a wrong
+outcome model sinks it. We refit under each scenario and read off the **true** policy value
+(same population, so gaps are comparable).
+
+> **Lecture link (double robustness).** AIPW gives you two chances; the outcome-only method
+> gives you one.
+
+```{r dr}
+# deliberately WRONG nuisance models (omit the true drivers severity/comorb/risk2)
+moMainW <- buildModelObj(model = ~ age_z + adherence, solver.method = "lm")
+moContW <- buildModelObj(model = ~ age_z + adherence, solver.method = "lm")
+moPropW <- buildModelObj(model = ~ 1, solver.method = "glm",
+                         solver.args = list(family = "binomial"),
+                         predict.method = "predict.glm", predict.args = list(type = "response"))
+
+# helpers: refit a two-stage rule and return its policy (d1, d2)
+fit_ql <- function(moM1, moC1, moM2, moC2) {
+  ss <- qLearn(moMain = moM2, moCont = moC2, data = obs, response = obs$Y, txName = "A2", verbose = FALSE)
+  fs <- qLearn(moMain = moM1, moCont = moC1, data = obs, response = ss,   txName = "A1", verbose = FALSE)
+  list(d1 = function(d) predict_intensive(fs, d), d2 = function(d) predict_intensive(ss, d))
+}
+fit_oc <- function(moP1, moP2, moM1, moC1, moM2, moC2) {
+  cls1 <- mk_class(~ severity + age_z + comorb + adherence)          # rule class stays correct
+  cls2 <- mk_class(~ severity + comorb + adherence + A1 + risk2)
+  ss <- optimalClass(moPropen = moP2, moMain = moM2, moCont = moC2, moClass = cls2,
+                     data = obs, response = obs$Y, txName = "A2", verbose = FALSE)
+  fs <- optimalClass(moPropen = moP1, moMain = moM1, moCont = moC1, moClass = cls1,
+                     data = obs, response = ss, txName = "A1", verbose = FALSE)
+  list(d1 = function(d) predict_intensive(fs, d), d2 = function(d) predict_intensive(ss, d))
+}
+
+seed_dr      <- 777
+oracle_value <- simulate_policy_value(n_eval, policy_oracle, seed = seed_dr)   # benchmark, same population
+
+dr <- data.frame(
+  scenario = c(
+    "Q-learning: correct outcome",
+    "Q-learning: WRONG outcome",
+    "AIPW: correct propensity + WRONG outcome",
+    "AIPW: WRONG propensity (~1) + correct outcome",
+    "AIPW: BOTH wrong"),
+  true_value = c(
+    simulate_policy_value(n_eval, fit_ql(moMain1, moCont1, moMain2, moCont2),                         seed = seed_dr),
+    simulate_policy_value(n_eval, fit_ql(moMainW, moContW, moMainW, moContW),                         seed = seed_dr),
+    simulate_policy_value(n_eval, fit_oc(moProp1, moProp2, moMainW, moContW, moMainW, moContW),        seed = seed_dr),
+    simulate_policy_value(n_eval, fit_oc(moPropW, moPropW, moMain1, moCont1, moMain2, moCont2),        seed = seed_dr),
+    simulate_policy_value(n_eval, fit_oc(moPropW, moPropW, moMainW, moContW, moMainW, moContW),        seed = seed_dr))
+)
+dr$true_value      <- round(dr$true_value, 2)
+dr$gap_from_oracle <- round(dr$true_value - oracle_value, 2)
+dr
+```
+
+# Visualize the true and learned stage-2 rule
+
+The true stage-2 rule recommends `Intensive` when the stage-2 blip is positive.
+Here we compare the oracle, Q-learning, and AIPW boundaries while holding the other
+covariates fixed.
+
+```{r stage2-map, fig.width=11, fig.height=4}
+grid <- expand.grid(
+  risk2 = seq(quantile(obs$risk2, 0.02), quantile(obs$risk2, 0.98), length.out = 120),
+  severity = seq(quantile(obs$severity, 0.02), quantile(obs$severity, 0.98), length.out = 120)
+)
+
+grid$age_z <- 0
+grid$adherence <- 0
+grid$comorb <- 0
+grid$a1_num <- 0
+grid$A1 <- factor("Control", levels = tx_levels)
+grid$A2 <- factor("Control", levels = tx_levels)
+
+grid$oracle <- tx_factor(oracle_a2(grid))
+grid$qlearn <- optTx(qSS,  newdata = grid)$optimalTx
+grid$oclass <- optTx(ocSS, newdata = grid)$optimalTx     # tree -> axis-aligned splits
+
+draw_rule <- function(rec, main) {
+  cols <- ifelse(rec == "Intensive", "#377EB8", "grey85")
+  plot(grid$risk2, grid$severity, col = cols, pch = 15, cex = 0.7,
+       xlab = "Stage-2 risk", ylab = "Baseline severity", main = main)
+  legend("topleft", legend = c("Control", "Intensive"),
+         fill = c("grey85", "#377EB8"), bty = "n")
+}
+
+par(mfrow = c(1, 3))
+draw_rule(grid$oracle, "Oracle stage-2 rule")
+draw_rule(grid$qlearn, "Q-learning stage-2 rule")
+draw_rule(grid$oclass, "AIPW stage-2 rule")
+```
+
+The oracle and Q-learning boundaries are smooth half-planes (their contrast is linear).
+**AIPW** here uses a **decision-tree** classifier (`rpart`, set in `mk_class`), so its boundary
+is a staircase of axis-aligned splits.
+
+# Practical takeaways
+
+- **Sequential confounding in observational data.** In observational multi-stage data the treatment
+  mechanism is part of the model, and `risk2` --- affected by stage-1 treatment, confounding
+  the stage-2 decision, and driving the outcome --- is the time-dependent confounder that
+  forces sequential methods.
+- **Two methods, one backbone.** Q-learning (outcome models + backward induction) and
+  AIPW (propensity + outcome, value-targeting classification) share the same
+  backward structure; they differ in whether they model the outcome, the propensity, or both.
+- **Check the propensity.** Simulation lets us compare fitted to true propensities directly;
+  in real data, settle for a plausible model assessed via standard regression diagnostics.
+- **Double robustness improves over IPW fragility** AIPW recovers the oracle when *either*
+  nuisance model is correct; the outcome-only method does not --- the case for AIPW whenever
+  you are unsure which model to trust.
+- **In-sample values are optimistic.** `estimator()` overstates a learned rule's value; honest
+  evaluation --- here deploying in the known DGP, in practice held-out data or cross validation.
+
+
